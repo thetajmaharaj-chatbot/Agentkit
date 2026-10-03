@@ -37,11 +37,14 @@ import java.util.Locale
 import kotlinx.coroutines.launch
 
 private val Ink = Color(0xFF102A43)
-private val Brand = Color(0xFF0A7A67)
-private val BrandSoft = Color(0xFFE8F5F1)
-private val Bg = Color(0xFFF6F8FA)
-private val Muted = Color(0xFF64748B)
-private val Border = Color(0xFFE2E8F0)
+private val Navy = Color(0xFF0B1F33)
+private val Brand = Color(0xFF0F766E)
+private val BrandSoft = Color(0xFFE7F3F1)
+private val Accent = Color(0xFFC7A76A)
+private val Bg = Color(0xFFF3F5F7)
+private val Muted = Color(0xFF667789)
+private val Border = Color(0xFFDCE3EA)
+private val SoftSurface = Color(0xFFF8FAFB)
 
 data class NavItem(val title: String, val icon: ImageVector)
 data class DrawerNav(val title: String, val icon: ImageVector, val tab: Int? = null, val route: String? = null)
@@ -73,6 +76,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AgentKit(state: AgentState) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
