@@ -4,10 +4,6 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val googleMapsApiKey = System.getenv("GOOGLE_MAPS_API_KEY")
-    ?: (project.findProperty("GOOGLE_MAPS_API_KEY") as String?)
-    ?: ""
-
 android {
     namespace = "za.co.agentkit"
     compileSdk = 35
@@ -15,19 +11,15 @@ android {
         applicationId = "za.co.agentkit"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0"
-        buildConfigField("String", "GOOGLE_MAPS_API_KEY", "\"$googleMapsApiKey\"")
+        versionCode = 5
+        versionName = "0.5.0"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures {
-        compose = true
-        buildConfig = true
-    }
+    buildFeatures { compose = true }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
 dependencies {
@@ -38,7 +30,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.9.0")
     implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("com.google.android.libraries.places:places:4.4.1")
-    implementation("com.google.android.material:material:1.12.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

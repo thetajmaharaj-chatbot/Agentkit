@@ -3,23 +3,27 @@ package za.co.agentkit
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.google.android.libraries.places.api.Places
-import com.google.android.libraries.places.api.model.Place
-import com.google.android.libraries.places.api.net.FetchPlaceRequest
-import com.google.android.libraries.places.widget.PlaceAutocomplete
-import com.google.android.libraries.places.widget.PlaceAutocompleteActivity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 
-data class GoogleAddressSelection(
+data class OSMAddressSelection(
     val title: String,
     val address: String,
     val suburb: String,
@@ -31,132 +35,174 @@ data class GoogleAddressSelection(
     val placeId: String
 )
 
-object GooglePlacesService {
-    fun configured(): Boolean = BuildConfig.GOOGLE_MAPS_API_KEY.isNotBlank()
-
-    fun initialize(context: Context): Boolean {
-        if (!configured()) return false
-        if (!Places.isInitialized()) {
-            Places.initializeWithNewPlacesApiEnabled(context.applicationContext, BuildConfig.GOOGLE_MAPS_API_KEY)
+object OpenStreetMapService {
+    fun openMap(context: Context, property: PropertyItem) {
+        val url = when {
+            property.latitude != 0.0 || property.longitude != 0.0 ->
+                "https://www.openstreetmap.org/?mlat=" + property.latitude +
+                    "&mlon=" + property.longitude +
+                    "#map=18/" + property.latitude + "/" + property.longitude
+            property.address.isNotBlank() ->
+                "https://www.openstreetmap.org/search?query=" + Uri.encode(property.address)
+            else ->
+                "https://www.openstreetmap.org/search?query=" + Uri.encode(property.title + " " + property.suburb)
         }
-        return true
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     }
 
-    fun openMaps(context: Context, property: PropertyItem) {
-        val uri = when {
-            property.latitude != 0.0 || property.longitude != 0.0 ->
-                Uri.parse("geo:${property.latitude},${property.longitude}?q=${property.latitude},${property.longitude}(" + Uri.encode(property.title) + ")")
-            property.address.isNotBlank() ->
-                Uri.parse("geo:0,0?q=" + Uri.encode(property.address))
-            else -> Uri.parse("geo:0,0?q=" + Uri.encode(property.title + " " + property.suburb))
+    suspend fun search(query: String): List<OSMAddressSelection> = withContext(Dispatchers.IO) {
+        if (query.trim().length < 3) return@withContext emptyList()
+
+        val encoded = URLEncoder.encode(query.trim(), "UTF-8")
+        val url = URL(
+            "https://nominatim.openstreetmap.org/search" +
+                "?format=jsonv2&addressdetails=1&limit=5&countrycodes=za&q=" + encoded
+        )
+        val connection = url.openConnection() as HttpURLConnection
+        try {
+            connection.connectTimeout = 10000
+            connection.readTimeout = 10000
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", "AgentKitSA/0.5 Android")
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Accept-Language", "en-ZA,en;q=0.9")
+
+            if (connection.responseCode !in 200..299) {
+                throw IllegalStateException("OpenStreetMap search returned " + connection.responseCode)
+            }
+
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
+            val array = JSONArray(body)
+
+            List(array.length()) { index ->
+                val item = array.getJSONObject(index)
+                val address = item.optJSONObject("address")
+
+                fun a(vararg names: String): String {
+                    if (address == null) return ""
+                    for (name in names) {
+                        val value = address.optString(name)
+                        if (value.isNotBlank()) return value
+                    }
+                    return ""
+                }
+
+                val road = a("road", "pedestrian", "residential", "path")
+                val house = a("house_number")
+                val primary = listOf(house, road).filter { it.isNotBlank() }.joinToString(" ")
+                    .ifBlank { item.optString("name").ifBlank { item.optString("display_name").substringBefore(",") } }
+
+                OSMAddressSelection(
+                    title = primary,
+                    address = item.optString("display_name"),
+                    suburb = a("suburb", "neighbourhood", "quarter", "city_district", "village"),
+                    city = a("city", "town", "municipality", "village"),
+                    province = a("state", "province"),
+                    postalCode = a("postcode"),
+                    latitude = item.optString("lat").toDoubleOrNull() ?: 0.0,
+                    longitude = item.optString("lon").toDoubleOrNull() ?: 0.0,
+                    placeId = item.optString("osm_type") + ":" + item.optString("osm_id")
+                )
+            }
+        } finally {
+            connection.disconnect()
         }
-        context.startActivity(Intent(Intent.ACTION_VIEW, uri))
     }
 }
 
 @Composable
-fun GoogleAddressPicker(
+fun OSMAddressPicker(
     currentQuery: String,
-    onSelected: (GoogleAddressSelection) -> Unit
+    onSelected: (OSMAddressSelection) -> Unit
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var error by remember { mutableStateOf<String?>(null) }
+    var query by remember(currentQuery) { mutableStateOf(currentQuery) }
+    var results by remember { mutableStateOf<List<OSMAddressSelection>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
+    var searched by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val data = result.data
-        if (data != null && result.resultCode == PlaceAutocompleteActivity.RESULT_OK) {
-            val prediction = PlaceAutocomplete.getPredictionFromIntent(data)
-            val sessionToken = PlaceAutocomplete.getSessionTokenFromIntent(data)
-            if (prediction != null && GooglePlacesService.initialize(context)) {
-                loading = true
-                val fields = listOf(
-                    Place.Field.ID,
-                    Place.Field.FORMATTED_ADDRESS,
-                    Place.Field.LOCATION,
-                    Place.Field.ADDRESS_COMPONENTS
-                )
-                val request = FetchPlaceRequest.builder(prediction.placeId, fields)
-                    .setSessionToken(sessionToken)
-                    .build()
+    OutlinedTextField(
+        value = query,
+        onValueChange = { query = it },
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        label = { Text("Search OpenStreetMap") },
+        placeholder = { Text("Street, suburb, city") },
+        leadingIcon = { Icon(Icons.Default.Search, null) },
+        singleLine = true,
+        shape = RoundedCornerShape(14.dp)
+    )
 
-                Places.createClient(context).fetchPlace(request)
-                    .addOnSuccessListener { response ->
-                        val place = response.place
-                        val components = place.addressComponents?.asList().orEmpty()
-                        fun component(vararg types: String): String =
-                            components.firstOrNull { c -> types.any { it in c.types } }?.name.orEmpty()
-
-                        val suburb = component(
-                            "sublocality_level_1",
-                            "sublocality",
-                            "neighborhood",
-                            "locality"
-                        )
-                        val city = component("locality", "postal_town")
-                        val province = component("administrative_area_level_1")
-                        val postal = component("postal_code")
-                        val location = place.location
-                        onSelected(
-                            GoogleAddressSelection(
-                                title = prediction.getPrimaryText(null).toString(),
-                                address = place.formattedAddress.orEmpty(),
-                                suburb = suburb,
-                                city = city,
-                                province = province,
-                                postalCode = postal,
-                                latitude = location?.latitude ?: 0.0,
-                                longitude = location?.longitude ?: 0.0,
-                                placeId = prediction.placeId
-                            )
-                        )
-                        loading = false
-                        error = null
-                    }
-                    .addOnFailureListener {
-                        loading = false
-                        error = it.message ?: "Google could not load this address."
-                    }
-            }
-        } else if (data != null) {
-            val status = PlaceAutocomplete.getResultStatusFromIntent(data)
-            if (status != null && !status.isSuccess) {
-                error = status.statusMessage ?: "Address search was not completed."
-            }
-        }
-    }
-
-    if (GooglePlacesService.configured()) {
-        Button(
-            onClick = {
-                if (GooglePlacesService.initialize(context)) {
-                    val intent = PlaceAutocomplete.IntentBuilder()
-                        .setInitialQuery(currentQuery)
-                        .build(context)
-                    launcher.launch(intent)
+    Button(
+        onClick = {
+            loading = true
+            searched = true
+            error = null
+            scope.launch {
+                try {
+                    results = OpenStreetMapService.search(query)
+                } catch (t: Throwable) {
+                    results = emptyList()
+                    error = t.message ?: "Address search failed."
+                } finally {
+                    loading = false
                 }
-            },
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-            enabled = !loading
-        ) {
-            Icon(Icons.Default.Search, null)
-            Spacer(Modifier.width(8.dp))
-            Text(if (loading) "Loading address…" else "Search address with Google")
-        }
-    } else {
-        OutlinedCard(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-            Row(Modifier.padding(14.dp)) {
-                Icon(Icons.Default.LocationOn, null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    "Google Places is ready but needs the GOOGLE_MAPS_API_KEY build secret. Manual address entry still works.",
-                    style = MaterialTheme.typography.bodySmall
-                )
             }
-        }
+        },
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        enabled = !loading && query.trim().length >= 3
+    ) {
+        Icon(Icons.Default.Map, null)
+        Spacer(Modifier.width(8.dp))
+        Text(if (loading) "Searching…" else "Search OpenStreetMap")
     }
 
     error?.let {
         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
     }
+
+    if (!loading && searched && results.isEmpty() && error == null) {
+        Text(
+            "No matching South African address found. You can still enter the address manually.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 6.dp)
+        )
+    }
+
+    results.forEach { item ->
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                onSelected(item)
+                query = item.address
+                results = emptyList()
+                searched = false
+            },
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Row(
+                Modifier.padding(14.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Icon(Icons.Default.LocationOn, null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(item.title, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        item.address,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+
+    Text(
+        "Address data © OpenStreetMap contributors",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 5.dp)
+    )
 }

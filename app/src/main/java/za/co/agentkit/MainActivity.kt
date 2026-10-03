@@ -402,8 +402,8 @@ private fun AddPropertyScreen(onBack: () -> Unit, onSave: (PropertyItem) -> Unit
         LinearProgressIndicator(progress = { (step + 1) / 4f }, modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp))
         when (step) {
             0 -> {
-                FormTitle("Location & price", "Find the address with Google or enter it manually.")
-                GoogleAddressPicker(
+                FormTitle("Location & price", "Find the address with OpenStreetMap or enter it manually.")
+                OSMAddressPicker(
                     currentQuery = address.ifBlank { title },
                     onSelected = { selected ->
                         title = selected.title.ifBlank { title }
@@ -425,7 +425,7 @@ private fun AddPropertyScreen(onBack: () -> Unit, onSave: (PropertyItem) -> Unit
                 Field(postalCode, { postalCode = it }, "Postal code")
                 if (latitude != 0.0 || longitude != 0.0) {
                     Text(
-                        "Google location: %.5f, %.5f".format(latitude, longitude),
+                        "OpenStreetMap location: %.5f, %.5f".format(latitude, longitude),
                         color = Muted,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(vertical = 4.dp)
@@ -620,12 +620,12 @@ private fun PropertyDetailScreen(
         if (property.notes.isNotBlank()) ReviewLine("Notes", property.notes)
         if (property.address.isNotBlank() || property.latitude != 0.0 || property.longitude != 0.0) {
             OutlinedButton(
-                onClick = { GooglePlacesService.openMaps(context, property) },
+                onClick = { OpenStreetMapService.openMap(context, property) },
                 modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
             ) {
                 Icon(Icons.Default.Map, null)
                 Spacer(Modifier.width(8.dp))
-                Text("Open in Google Maps")
+                Text("Open in OpenStreetMap")
             }
         }
         Row(Modifier.padding(top = 12.dp)) {
