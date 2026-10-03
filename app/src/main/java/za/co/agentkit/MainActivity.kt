@@ -34,6 +34,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 private val Ink = Color(0xFF102A43)
 private val Brand = Color(0xFF0A7A67)
@@ -43,13 +44,26 @@ private val Muted = Color(0xFF64748B)
 private val Border = Color(0xFFE2E8F0)
 
 data class NavItem(val title: String, val icon: ImageVector)
+data class DrawerNav(val title: String, val icon: ImageVector, val tab: Int? = null, val route: String? = null)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme(
-                colorScheme = lightColorScheme(primary = Brand, background = Bg, surface = Color.White)
+                colorScheme = lightColorScheme(
+                    primary = Brand,
+                    onPrimary = Color.White,
+                    primaryContainer = BrandSoft,
+                    onPrimaryContainer = Ink,
+                    secondary = Navy,
+                    onSecondary = Color.White,
+                    tertiary = Accent,
+                    background = Bg,
+                    surface = Color.White,
+                    surfaceVariant = SoftSurface,
+                    outline = Border
+                )
             ) {
                 val context = LocalContext.current
                 val state = remember { AgentState(LocalStore(context.applicationContext)) }
@@ -65,105 +79,282 @@ fun AgentKit(state: AgentState) {
     var route by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedPropertyId by rememberSaveable { mutableStateOf<String?>(null) }
 
-    val tabs = listOf(
-        NavItem("Home", Icons.Default.Home),
-        NavItem("Properties", Icons.Default.Apartment),
-        NavItem("Leads", Icons.Default.Groups),
-        NavItem("Calendar", Icons.Default.CalendarMonth),
-        NavItem("More", Icons.Default.Menu)
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+
+    val primaryItems = listOf(
+        DrawerNav("Dashboard", Icons.Default.SpaceDashboard, tab = 0),
+        DrawerNav("Properties", Icons.Default.Apartment, tab = 1),
+        DrawerNav("Leads & CRM", Icons.Default.Groups, tab = 2),
+        DrawerNav("Calendar", Icons.Default.CalendarMonth, tab = 3)
     )
+    val toolItems = listOf(
+        DrawerNav("Marketing Studio", Icons.Default.AutoAwesome, route = "marketing"),
+        DrawerNav("Documents", Icons.Default.Folder, route = "documents"),
+        DrawerNav("Voice Notes", Icons.Default.Mic, route = "voice_notes"),
+        DrawerNav("Deal Pipeline", Icons.Default.AccountTree, route = "pipeline"),
+        DrawerNav("Commission", Icons.Default.Calculate, route = "commission"),
+        DrawerNav("Seller Reports", Icons.Default.PictureAsPdf, route = "seller_report")
+    )
+
+    fun openRootTab(index: Int) {
+        tab = index
+        route = null
+    }
 
     val openProperty: (String) -> Unit = {
         selectedPropertyId = it
         route = "property_detail"
     }
 
-    Scaffold(
-        containerColor = Bg,
-        bottomBar = {
-            if (route == null) {
-                NavigationBar(containerColor = Color.White) {
-                    tabs.forEachIndexed { index, item ->
-                        NavigationBarItem(
-                            selected = tab == index,
-                            onClick = { tab = index },
-                            icon = { Icon(item.icon, null) },
-                            label = { Text(item.title) }
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        gesturesEnabled = route == null,
+        drawerContent = {
+            ModalDrawerSheet(
+                modifier = Modifier.width(312.dp),
+                drawerContainerColor = Color.White,
+                drawerContentColor = Ink
+            ) {
+                CorporateDrawerHeader()
+                Text(
+                    "WORKSPACE",
+                    color = Muted,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 10.sp,
+                    letterSpacing = 1.2.sp,
+                    modifier = Modifier.padding(start = 22.dp, top = 18.dp, bottom = 8.dp)
+                )
+                primaryItems.forEach { item ->
+                    NavigationDrawerItem(
+                        label = {
+                            Text(
+                                item.title,
+                                fontWeight = if (route == null && tab == item.tab) FontWeight.Bold else FontWeight.Medium
+                            )
+                        },
+                        selected = route == null && tab == item.tab,
+                        onClick = {
+                            item.tab?.let(::openRootTab)
+                            scope.launch { drawerState.close() }
+                        },
+                        icon = { Icon(item.icon, null) },
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = NavigationDrawerItemDefaults.colors(
+                            selectedContainerColor = BrandSoft,
+                            selectedIconColor = Brand,
+                            selectedTextColor = Ink,
+                            unselectedIconColor = Muted,
+                            unselectedTextColor = Ink
                         )
+                    )
+                }
+
+                HorizontalDivider(Modifier.padding(horizontal = 18.dp, vertical = 12.dp), color = Border)
+
+                Text(
+                    "AGENT TOOLS",
+                    color = Muted,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 10.sp,
+                    letterSpacing = 1.2.sp,
+                    modifier = Modifier.padding(start = 22.dp, bottom = 8.dp)
+                )
+                toolItems.forEach { item ->
+                    NavigationDrawerItem(
+                        label = { Text(item.title, fontWeight = FontWeight.Medium) },
+                        selected = route == item.route,
+                        onClick = {
+                            route = item.route
+                            scope.launch { drawerState.close() }
+                        },
+                        icon = { Icon(item.icon, null) },
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 1.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = NavigationDrawerItemDefaults.colors(
+                            selectedContainerColor = BrandSoft,
+                            selectedIconColor = Brand,
+                            selectedTextColor = Ink,
+                            unselectedIconColor = Muted,
+                            unselectedTextColor = Ink
+                        )
+                    )
+                }
+
+                Spacer(Modifier.weight(1f))
+                Surface(
+                    modifier = Modifier.padding(14.dp).fillMaxWidth(),
+                    color = Navy,
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Row(
+                        Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier.size(34.dp).background(Accent, RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("AK", color = Navy, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
+                        }
+                        Column(Modifier.padding(start = 10.dp)) {
+                            Text("AgentKit SA", color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("Offline-ready workspace", color = Color.White.copy(alpha = .70f), fontSize = 11.sp)
+                        }
                     }
                 }
-            }
-        },
-        floatingActionButton = {
-            if (route == null) {
-                FloatingActionButton(
-                    onClick = { route = "quick_add" },
-                    containerColor = Brand,
-                    contentColor = Color.White
-                ) { Icon(Icons.Default.Add, "Quick add") }
             }
         }
-    ) { padding ->
-        Box(Modifier.padding(padding).fillMaxSize()) {
-            when (route) {
-                "quick_add" -> QuickAddScreen({ route = null }) { route = it }
-                "add_property" -> AddPropertyScreen(
-                    onBack = { route = null },
-                    onSave = {
-                        state.addProperty(it)
-                        route = null
-                        tab = 1
-                    }
-                )
-                "property_detail" -> {
-                    val property = state.properties.firstOrNull { it.id == selectedPropertyId }
-                    if (property == null) {
-                        EmptyScreen("Property not found") { route = null }
-                    } else {
-                        PropertyDetailScreen(
-                            property = property,
-                            onBack = { route = null },
-                            onStatus = { status -> state.updateProperty(property.copy(status = status)) },
-                            onDelete = {
-                                state.deleteProperty(property.id)
-                                route = null
-                            },
-                            onMarketing = { route = "marketing" },
-                            onSellerReport = { route = "seller_report" }
-                        )
-                    }
+    ) {
+        Scaffold(
+            containerColor = Bg,
+            topBar = {
+                if (route == null) {
+                    TopAppBar(
+                        title = {
+                            Column {
+                                Text(
+                                    when (tab) {
+                                        0 -> "AgentKit SA"
+                                        1 -> "Properties"
+                                        2 -> "Leads & CRM"
+                                        else -> "Calendar"
+                                    },
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp
+                                )
+                                Text(
+                                    "Independent Agent Workspace",
+                                    color = Color.White.copy(alpha = .68f),
+                                    fontSize = 10.sp
+                                )
+                            }
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(Icons.Default.Menu, "Open menu", tint = Color.White)
+                            }
+                        },
+                        actions = {
+                            Surface(
+                                color = Color.White.copy(alpha = .10f),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.padding(end = 12.dp)
+                            ) {
+                                Text(
+                                    "v0.6",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Navy)
+                    )
                 }
-                "add_contact" -> AddContactScreen(
-                    onBack = { route = null },
-                    onSave = {
-                        state.addContact(it)
-                        route = null
-                        tab = 2
-                    }
-                )
-                "schedule_viewing" -> ScheduleViewingScreen(
-                    state = state,
-                    onBack = { route = null },
-                    onSave = {
-                        state.addViewing(it)
-                        route = null
-                        tab = 3
-                    }
-                )
-                "commission" -> CommissionScreen { route = null }
-                "documents" -> DocumentVaultScreen { route = null }
-                "voice_notes" -> VoiceNotesScreen { route = null }
-                "marketing" -> MarketingStudioScreen(state.properties, selectedPropertyId) { route = null }
-                "seller_report" -> SellerReportScreen(state.properties, state.viewings, selectedPropertyId) { route = null }
-                "pipeline" -> PipelineScreen(state.properties) { route = null }
-                else -> when (tab) {
-                    0 -> HomeScreen(state, { route = it }, openProperty)
-                    1 -> PropertiesScreen(state, { route = "add_property" }, openProperty)
-                    2 -> LeadsScreen(state) { route = "add_contact" }
-                    3 -> CalendarScreen(state) { route = "schedule_viewing" }
-                    else -> MoreScreen { route = it }
+            },
+            floatingActionButton = {
+                if (route == null) {
+                    ExtendedFloatingActionButton(
+                        onClick = { route = "quick_add" },
+                        containerColor = Brand,
+                        contentColor = Color.White,
+                        icon = { Icon(Icons.Default.Add, null) },
+                        text = { Text("Quick add", fontWeight = FontWeight.Bold) },
+                        shape = RoundedCornerShape(14.dp)
+                    )
                 }
             }
+        ) { padding ->
+            Box(Modifier.padding(padding).fillMaxSize()) {
+                when (route) {
+                    "quick_add" -> QuickAddScreen({ route = null }) { route = it }
+                    "add_property" -> AddPropertyScreen(
+                        onBack = { route = null },
+                        onSave = {
+                            state.addProperty(it)
+                            route = null
+                            tab = 1
+                        }
+                    )
+                    "property_detail" -> {
+                        val property = state.properties.firstOrNull { it.id == selectedPropertyId }
+                        if (property == null) {
+                            EmptyScreen("Property not found") { route = null }
+                        } else {
+                            PropertyDetailScreen(
+                                property = property,
+                                onBack = { route = null },
+                                onStatus = { status -> state.updateProperty(property.copy(status = status)) },
+                                onDelete = {
+                                    state.deleteProperty(property.id)
+                                    route = null
+                                },
+                                onMarketing = { route = "marketing" },
+                                onSellerReport = { route = "seller_report" }
+                            )
+                        }
+                    }
+                    "add_contact" -> AddContactScreen(
+                        onBack = { route = null },
+                        onSave = {
+                            state.addContact(it)
+                            route = null
+                            tab = 2
+                        }
+                    )
+                    "schedule_viewing" -> ScheduleViewingScreen(
+                        state = state,
+                        onBack = { route = null },
+                        onSave = {
+                            state.addViewing(it)
+                            route = null
+                            tab = 3
+                        }
+                    )
+                    "commission" -> CommissionScreen { route = null }
+                    "documents" -> DocumentVaultScreen { route = null }
+                    "voice_notes" -> VoiceNotesScreen { route = null }
+                    "marketing" -> MarketingStudioScreen(state.properties, selectedPropertyId) { route = null }
+                    "seller_report" -> SellerReportScreen(state.properties, state.viewings, selectedPropertyId) { route = null }
+                    "pipeline" -> PipelineScreen(state.properties) { route = null }
+                    else -> when (tab) {
+                        0 -> HomeScreen(state, { route = it }, openProperty)
+                        1 -> PropertiesScreen(state, { route = "add_property" }, openProperty)
+                        2 -> LeadsScreen(state) { route = "add_contact" }
+                        else -> CalendarScreen(state) { route = "schedule_viewing" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CorporateDrawerHeader() {
+    Surface(color = Navy) {
+        Column(Modifier.fillMaxWidth().padding(22.dp, 28.dp, 22.dp, 22.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(48.dp).background(Accent, RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("AK", color = Navy, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                }
+                Column(Modifier.padding(start = 12.dp)) {
+                    Text("AGENTKIT", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, letterSpacing = 1.sp)
+                    Text("SOUTH AFRICA", color = Color.White.copy(alpha = .60f), fontWeight = FontWeight.Bold, fontSize = 10.sp, letterSpacing = 1.6.sp)
+                }
+            }
+            Text(
+                "Your property business in one place.",
+                color = Color.White.copy(alpha = .80f),
+                fontSize = 13.sp,
+                modifier = Modifier.padding(top = 16.dp)
+            )
         }
     }
 }
@@ -832,9 +1023,23 @@ private fun PipelineScreen(properties: List<PropertyItem>, onBack: () -> Unit) {
 
 @Composable
 private fun Header(title: String, subtitle: String) {
-    Column(Modifier.padding(20.dp, 22.dp, 20.dp, 12.dp)) {
-        Text(title, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Ink)
-        Text(subtitle, color = Muted, fontSize = 14.sp)
+    Column(Modifier.padding(20.dp, 20.dp, 20.dp, 12.dp)) {
+        Text(
+            "AGENT WORKSPACE",
+            color = Brand,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = 1.4.sp
+        )
+        Text(
+            title,
+            fontSize = 27.sp,
+            lineHeight = 31.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = Ink,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+        Text(subtitle, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 3.dp))
     }
 }
 
@@ -861,24 +1066,30 @@ private fun EmptyScreen(message: String, onBack: () -> Unit) {
 @Composable
 private fun PropertyCard(item: PropertyItem, onClick: () -> Unit) {
     Card(
-        Modifier.padding(horizontal = 20.dp, vertical = 6.dp).fillMaxWidth().clickable(onClick = onClick),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp).fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(Modifier.padding(18.dp)) {
+        Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(52.dp).background(BrandSoft, RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier.size(48.dp).background(BrandSoft, RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(Icons.Default.HomeWork, null, tint = Brand)
                 }
                 Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                    Text(item.title, fontWeight = FontWeight.Bold, color = Ink, fontSize = 17.sp)
-                    Text(item.suburb, color = Muted, fontSize = 13.sp)
+                    Text(item.title, fontWeight = FontWeight.Bold, color = Ink, fontSize = 16.sp)
+                    Text(item.suburb, color = Muted, fontSize = 12.sp)
                 }
                 StatusPill(item.status)
             }
-            Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(money(item.price), fontWeight = FontWeight.Bold, color = Ink, fontSize = 20.sp, modifier = Modifier.weight(1f))
-                Text(item.bedrooms.toString() + " bed • " + item.bathrooms + " bath", color = Muted, fontSize = 13.sp)
+            HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Border)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(money(item.price), fontWeight = FontWeight.ExtraBold, color = Navy, fontSize = 19.sp, modifier = Modifier.weight(1f))
+                Text(item.bedrooms.toString() + " bed • " + item.bathrooms + " bath", color = Muted, fontSize = 12.sp)
             }
         }
     }
@@ -886,43 +1097,64 @@ private fun PropertyCard(item: PropertyItem, onClick: () -> Unit) {
 
 @Composable
 private fun ActionTile(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit) {
-    Row(
-        Modifier.padding(horizontal = 20.dp, vertical = 4.dp).fillMaxWidth()
-            .background(Color.White, RoundedCornerShape(18.dp)).clickable(onClick = onClick).padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically
+    Card(
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp).fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(15.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Box(Modifier.size(44.dp).background(BrandSoft, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = Brand)
+        Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(42.dp).background(BrandSoft, RoundedCornerShape(11.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, null, tint = Brand, modifier = Modifier.size(22.dp))
+            }
+            Column(Modifier.weight(1f).padding(horizontal = 13.dp)) {
+                Text(title, fontWeight = FontWeight.Bold, color = Ink, fontSize = 15.sp)
+                Text(subtitle, color = Muted, fontSize = 11.sp)
+            }
+            Icon(Icons.Default.ChevronRight, null, tint = Muted.copy(alpha = .65f))
         }
-        Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
-            Text(title, fontWeight = FontWeight.SemiBold, color = Ink)
-            Text(subtitle, color = Muted, fontSize = 12.sp)
-        }
-        Icon(Icons.Default.ChevronRight, null, tint = Muted)
     }
 }
 
 @Composable
 private fun CardBlock(label: String, value: String, subtitle: String, onClick: () -> Unit) {
-    Column(
-        Modifier.padding(horizontal = 20.dp).fillMaxWidth().background(Ink, RoundedCornerShape(24.dp))
-            .clickable(onClick = onClick).padding(22.dp)
+    Card(
+        modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Navy),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Text(label, color = Color.White.copy(alpha = .65f), fontWeight = FontWeight.Bold)
-        Text(value, color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
-        Text(subtitle, color = Color.White.copy(alpha = .8f))
+        Column(Modifier.padding(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.width(4.dp).height(34.dp).background(Accent, RoundedCornerShape(4.dp)))
+                Column(Modifier.padding(start = 12.dp)) {
+                    Text(label, color = Color.White.copy(alpha = .62f), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.2.sp)
+                    Text(value, color = Color.White, fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.ExtraBold)
+                }
+            }
+            Text(subtitle, color = Color.White.copy(alpha = .72f), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp, start = 16.dp))
+        }
     }
 }
 
 @Composable
 private fun RowScope.Metric(number: String, label: String, icon: ImageVector, onClick: () -> Unit) {
-    Column(
-        Modifier.weight(1f).padding(6.dp).background(Color.White, RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick).padding(18.dp)
+    Card(
+        modifier = Modifier.weight(1f).padding(6.dp).clickable(onClick = onClick),
+        shape = RoundedCornerShape(15.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Icon(icon, null, tint = Brand)
-        Text(number, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Ink)
-        Text(label, color = Muted)
+        Column(Modifier.padding(16.dp)) {
+            Icon(icon, null, tint = Brand, modifier = Modifier.size(21.dp))
+            Text(number, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, color = Navy, modifier = Modifier.padding(top = 8.dp))
+            Text(label, color = Muted, fontSize = 12.sp)
+        }
     }
 }
 
@@ -932,10 +1164,16 @@ private fun SearchField(value: String, onChange: (String) -> Unit, placeholder: 
         value = value,
         onValueChange = onChange,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-        placeholder = { Text(placeholder) },
-        leadingIcon = { Icon(Icons.Default.Search, null) },
+        placeholder = { Text(placeholder, color = Muted) },
+        leadingIcon = { Icon(Icons.Default.Search, null, tint = Brand) },
         singleLine = true,
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(12.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = Brand,
+            unfocusedBorderColor = Border,
+            focusedContainerColor = Color.White,
+            unfocusedContainerColor = Color.White
+        )
     )
 }
 
@@ -995,7 +1233,7 @@ private fun ReviewLine(label: String, value: String) {
 
 @Composable
 private fun SectionTitle(text: String) {
-    Text(text.uppercase(), color = Muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(20.dp, 20.dp, 20.dp, 8.dp), fontSize = 12.sp)
+    Text(text.uppercase(), color = Muted, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(20.dp, 20.dp, 20.dp, 8.dp), fontSize = 10.sp, letterSpacing = 1.1.sp)
 }
 
 @Composable
@@ -1014,7 +1252,7 @@ private fun EmptyCard(title: String, subtitle: String) {
 private fun StatusPill(status: String, light: Boolean = false) {
     val bg = if (light) Color.White.copy(alpha = .14f) else BrandSoft
     val fg = if (light) Color.White else Brand
-    Box(Modifier.background(bg, RoundedCornerShape(30.dp)).padding(horizontal = 10.dp, vertical = 5.dp)) {
+    Box(Modifier.background(bg, RoundedCornerShape(8.dp)).padding(horizontal = 9.dp, vertical = 5.dp)) {
         Text(status, color = fg, fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }
