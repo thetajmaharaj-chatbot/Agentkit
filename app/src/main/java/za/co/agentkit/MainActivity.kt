@@ -1,5 +1,10 @@
 package za.co.agentkit
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -9,97 +14,152 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.text.NumberFormat
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 private val Ink = Color(0xFF102A43)
 private val Brand = Color(0xFF0A7A67)
+private val BrandSoft = Color(0xFFE8F5F1)
 private val Bg = Color(0xFFF6F8FA)
 private val Muted = Color(0xFF64748B)
+private val Border = Color(0xFFE2E8F0)
 
-data class Page(val title: String, val subtitle: String, val icon: ImageVector)
+data class NavItem(val title: String, val icon: ImageVector)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme(
-                colorScheme = lightColorScheme(
-                    primary = Brand,
-                    background = Bg,
-                    surface = Color.White
-                )
+                colorScheme = lightColorScheme(primary = Brand, background = Bg, surface = Color.White)
             ) {
-                AgentKit()
+                val context = LocalContext.current
+                val state = remember { AgentState(LocalStore(context.applicationContext)) }
+                AgentKit(state)
             }
         }
     }
 }
 
 @Composable
-fun AgentKit() {
-    var tab by remember { mutableIntStateOf(0) }
-    var page by remember { mutableStateOf<Page?>(null) }
+fun AgentKit(state: AgentState) {
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var route by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedPropertyId by rememberSaveable { mutableStateOf<String?>(null) }
 
     val tabs = listOf(
-        Page("Home", "Your business at a glance", Icons.Default.Home),
-        Page("Properties", "Manage your portfolio", Icons.Default.Apartment),
-        Page("Leads", "Buyers, sellers & follow-ups", Icons.Default.Groups),
-        Page("Calendar", "Viewings, tasks & reminders", Icons.Default.CalendarMonth),
-        Page("More", "Everything else", Icons.Default.Menu)
+        NavItem("Home", Icons.Default.Home),
+        NavItem("Properties", Icons.Default.Apartment),
+        NavItem("Leads", Icons.Default.Groups),
+        NavItem("Calendar", Icons.Default.CalendarMonth),
+        NavItem("More", Icons.Default.Menu)
     )
+
+    val openProperty: (String) -> Unit = {
+        selectedPropertyId = it
+        route = "property_detail"
+    }
 
     Scaffold(
         containerColor = Bg,
         bottomBar = {
-            NavigationBar(containerColor = Color.White) {
-                tabs.forEachIndexed { index, item ->
-                    NavigationBarItem(
-                        selected = tab == index && page == null,
-                        onClick = {
-                            tab = index
-                            page = null
-                        },
-                        icon = { Icon(item.icon, contentDescription = null) },
-                        label = { Text(item.title) }
-                    )
+            if (route == null) {
+                NavigationBar(containerColor = Color.White) {
+                    tabs.forEachIndexed { index, item ->
+                        NavigationBarItem(
+                            selected = tab == index,
+                            onClick = { tab = index },
+                            icon = { Icon(item.icon, null) },
+                            label = { Text(item.title) }
+                        )
+                    }
                 }
             }
         },
         floatingActionButton = {
-            if (page == null) {
+            if (route == null) {
                 FloatingActionButton(
-                    onClick = {
-                        page = Page("Quick add", "Create something new", Icons.Default.Add)
-                    },
+                    onClick = { route = "quick_add" },
                     containerColor = Brand,
                     contentColor = Color.White
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Quick add")
-                }
+                ) { Icon(Icons.Default.Add, "Quick add") }
             }
         }
     ) { padding ->
-        Box(Modifier.padding(padding)) {
-            val currentPage = page
-            if (currentPage != null) {
-                Detail(currentPage) { page = null }
-            } else {
-                when (tab) {
-                    0 -> Home { page = it }
-                    1 -> Properties { page = it }
-                    2 -> Leads { page = it }
-                    3 -> Calendar { page = it }
-                    else -> More { page = it }
+        Box(Modifier.padding(padding).fillMaxSize()) {
+            when (route) {
+                "quick_add" -> QuickAddScreen({ route = null }) { route = it }
+                "add_property" -> AddPropertyScreen(
+                    onBack = { route = null },
+                    onSave = {
+                        state.addProperty(it)
+                        route = null
+                        tab = 1
+                    }
+                )
+                "property_detail" -> {
+                    val property = state.properties.firstOrNull { it.id == selectedPropertyId }
+                    if (property == null) {
+                        EmptyScreen("Property not found") { route = null }
+                    } else {
+                        PropertyDetailScreen(
+                            property = property,
+                            onBack = { route = null },
+                            onStatus = { status -> state.updateProperty(property.copy(status = status)) },
+                            onDelete = {
+                                state.deleteProperty(property.id)
+                                route = null
+                            },
+                            onMarketing = { route = "marketing" },
+                            onSellerReport = { route = "seller_report" }
+                        )
+                    }
+                }
+                "add_contact" -> AddContactScreen(
+                    onBack = { route = null },
+                    onSave = {
+                        state.addContact(it)
+                        route = null
+                        tab = 2
+                    }
+                )
+                "schedule_viewing" -> ScheduleViewingScreen(
+                    state = state,
+                    onBack = { route = null },
+                    onSave = {
+                        state.addViewing(it)
+                        route = null
+                        tab = 3
+                    }
+                )
+                "commission" -> CommissionScreen { route = null }
+                "marketing" -> MarketingStudioScreen(state.properties, selectedPropertyId) { route = null }
+                "seller_report" -> SellerReportScreen(state.properties, state.viewings, selectedPropertyId) { route = null }
+                "pipeline" -> PipelineScreen(state.properties) { route = null }
+                else -> when (tab) {
+                    0 -> HomeScreen(state, { route = it }, openProperty)
+                    1 -> PropertiesScreen(state, { route = "add_property" }, openProperty)
+                    2 -> LeadsScreen(state) { route = "add_contact" }
+                    3 -> CalendarScreen(state) { route = "schedule_viewing" }
+                    else -> MoreScreen { route = it }
                 }
             }
         }
@@ -107,7 +167,577 @@ fun AgentKit() {
 }
 
 @Composable
-fun Header(title: String, subtitle: String) {
+private fun HomeScreen(state: AgentState, open: (String) -> Unit, openProperty: (String) -> Unit) {
+    val greeting = when (LocalTime.now().hour) {
+        in 0..11 -> "Good morning"
+        in 12..16 -> "Good afternoon"
+        else -> "Good evening"
+    }
+    val date = LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy"))
+    val active = state.properties.count { it.status == "Active" }
+    val pipeline = state.properties.filter { it.status != "Sold" }.sumOf { it.price }
+
+    Column(Modifier.verticalScroll(rememberScrollState())) {
+        Header(greeting, date)
+        CardBlock("YOUR PIPELINE", money(pipeline), "$active active properties") { open("pipeline") }
+        SectionTitle("Today")
+        Row(Modifier.padding(horizontal = 14.dp)) {
+            Metric("${state.viewings.count { it.status == "Scheduled" }}", "Viewings", Icons.Default.Visibility) { open("schedule_viewing") }
+            Metric("${state.contacts.size}", "Contacts", Icons.Default.Groups) { }
+        }
+        SectionTitle("Quick actions")
+        ActionTile("Add property", "Capture a new listing", Icons.Default.AddHome) { open("add_property") }
+        ActionTile("Add lead", "Save a buyer or seller", Icons.Default.PersonAdd) { open("add_contact") }
+        ActionTile("Schedule viewing", "Book a property viewing", Icons.Default.EventAvailable) { open("schedule_viewing") }
+        ActionTile("Marketing Studio", "Create listing copy ready to share", Icons.Default.AutoAwesome) { open("marketing") }
+
+        if (state.properties.isNotEmpty()) {
+            SectionTitle("Recent properties")
+            state.properties.take(3).forEach { PropertyCard(it) { openProperty(it.id) } }
+        } else {
+            EmptyCard("No properties yet", "Add your first property to start building your portfolio.")
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun PropertiesScreen(state: AgentState, openAdd: () -> Unit, openProperty: (String) -> Unit) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val filtered = state.properties.filter {
+        query.isBlank() || it.title.contains(query, true) || it.suburb.contains(query, true) || it.status.contains(query, true)
+    }
+    Column {
+        Header("Properties", "${state.properties.size} properties")
+        SearchField(query, { query = it }, "Search address, suburb or status")
+        Button(
+            onClick = openAdd,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp).fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Icon(Icons.Default.Add, null)
+            Spacer(Modifier.width(8.dp))
+            Text("Add property")
+        }
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            if (filtered.isEmpty()) EmptyCard("No matching properties", "Add a listing or change your search.")
+            else filtered.forEach { PropertyCard(it) { openProperty(it.id) } }
+        }
+    }
+}
+
+@Composable
+private fun LeadsScreen(state: AgentState, openAdd: () -> Unit) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var role by rememberSaveable { mutableStateOf("All") }
+    val context = LocalContext.current
+    val filtered = state.contacts.filter {
+        (role == "All" || it.role == role) &&
+            (query.isBlank() || it.name.contains(query, true) || it.area.contains(query, true) || it.phone.contains(query))
+    }
+
+    Column {
+        Header("Leads & CRM", "${state.contacts.size} contacts")
+        SearchField(query, { query = it }, "Search name, area or phone")
+        ChoiceRow(listOf("All", "Buyer", "Seller"), role) { role = it }
+        Button(
+            onClick = openAdd,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Icon(Icons.Default.PersonAdd, null)
+            Spacer(Modifier.width(8.dp))
+            Text("Add contact")
+        }
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            if (filtered.isEmpty()) EmptyCard("No contacts found", "Capture buyers and sellers so every follow-up stays in one place.")
+            filtered.forEach { contact ->
+                Card(
+                    Modifier.padding(horizontal = 20.dp, vertical = 6.dp).fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                ) {
+                    Column(Modifier.padding(18.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier.size(44.dp).background(BrandSoft, RoundedCornerShape(14.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(if (contact.role == "Buyer") Icons.Default.PersonSearch else Icons.Default.RealEstateAgent, null, tint = Brand)
+                            }
+                            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                Text(contact.name, fontWeight = FontWeight.Bold, color = Ink, fontSize = 17.sp)
+                                Text(contact.role + " • " + contact.area.ifBlank { "Area not set" }, color = Muted, fontSize = 13.sp)
+                            }
+                            Text(if (contact.budget > 0) money(contact.budget) else "", color = Brand, fontWeight = FontWeight.SemiBold)
+                        }
+                        if (contact.notes.isNotBlank()) Text(contact.notes, Modifier.padding(top = 12.dp), color = Muted, fontSize = 13.sp)
+                        Row(Modifier.padding(top = 12.dp)) {
+                            OutlinedButton(onClick = { dial(context, contact.phone) }, modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Default.Phone, null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Call")
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Button(onClick = { whatsapp(context, contact.phone) }, modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Default.Chat, null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("WhatsApp")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarScreen(state: AgentState, openAdd: () -> Unit) {
+    Column {
+        Header("Calendar", LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, d MMMM")))
+        Button(
+            onClick = openAdd,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Icon(Icons.Default.EventAvailable, null)
+            Spacer(Modifier.width(8.dp))
+            Text("Schedule viewing")
+        }
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            if (state.viewings.isEmpty()) EmptyCard("No viewings scheduled", "Create a viewing and it will appear here.")
+            state.viewings.forEach { viewing ->
+                Card(
+                    Modifier.padding(horizontal = 20.dp, vertical = 6.dp).fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                ) {
+                    Column(Modifier.padding(18.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(48.dp).background(BrandSoft, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Visibility, null, tint = Brand)
+                            }
+                            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                Text(viewing.propertyName, fontWeight = FontWeight.Bold, color = Ink)
+                                Text(viewing.date + " • " + viewing.time, color = Muted, fontSize = 13.sp)
+                                Text(viewing.contactName, color = Muted, fontSize = 13.sp)
+                            }
+                            StatusPill(viewing.status)
+                        }
+                        if (viewing.notes.isNotBlank()) Text(viewing.notes, Modifier.padding(top = 10.dp), color = Muted, fontSize = 13.sp)
+                        if (viewing.status != "Completed") {
+                            TextButton(onClick = { state.completeViewing(viewing.id) }, modifier = Modifier.align(Alignment.End)) {
+                                Icon(Icons.Default.CheckCircle, null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Mark completed")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MoreScreen(open: (String) -> Unit) {
+    Column(Modifier.verticalScroll(rememberScrollState())) {
+        Header("AgentKit SA", "Your professional toolkit")
+        SectionTitle("Business tools")
+        ActionTile("Deal pipeline", "See draft, active, offer and sold stages", Icons.Default.AccountTree) { open("pipeline") }
+        ActionTile("Commission calculator", "Calculate commission and VAT", Icons.Default.Calculate) { open("commission") }
+        ActionTile("Marketing Studio", "Generate property listing copy", Icons.Default.AutoAwesome) { open("marketing") }
+        ActionTile("Seller report", "Build a seller activity summary", Icons.Default.PictureAsPdf) { open("seller_report") }
+        ActionTile("Documents", "Mandates, IDs and supporting documents", Icons.Default.Folder) { }
+        ActionTile("Agent branding", "Agency logo and agent profile", Icons.Default.Palette) { }
+        ActionTile("Settings", "Security, backup and preferences", Icons.Default.Settings) { }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun QuickAddScreen(onBack: () -> Unit, open: (String) -> Unit) {
+    PageScaffold("Quick add", "Choose what you want to create", onBack) {
+        ActionTile("Property", "Capture a listing", Icons.Default.AddHome) { open("add_property") }
+        ActionTile("Contact", "Add a buyer or seller", Icons.Default.PersonAdd) { open("add_contact") }
+        ActionTile("Viewing", "Schedule a property viewing", Icons.Default.EventAvailable) { open("schedule_viewing") }
+    }
+}
+
+@Composable
+private fun AddPropertyScreen(onBack: () -> Unit, onSave: (PropertyItem) -> Unit) {
+    var step by rememberSaveable { mutableIntStateOf(0) }
+    var title by rememberSaveable { mutableStateOf("") }
+    var suburb by rememberSaveable { mutableStateOf("") }
+    var price by rememberSaveable { mutableStateOf("") }
+    var bedrooms by rememberSaveable { mutableStateOf("") }
+    var bathrooms by rememberSaveable { mutableStateOf("") }
+    var type by rememberSaveable { mutableStateOf("House") }
+    var status by rememberSaveable { mutableStateOf("Active") }
+    var sellerName by rememberSaveable { mutableStateOf("") }
+    var sellerPhone by rememberSaveable { mutableStateOf("") }
+    var notes by rememberSaveable { mutableStateOf("") }
+
+    PageScaffold("Add property", "Step ${step + 1} of 4", onBack) {
+        LinearProgressIndicator(progress = { (step + 1) / 4f }, modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp))
+        when (step) {
+            0 -> {
+                FormTitle("Basics", "Start with the property identity and asking price.")
+                Field(title, { title = it }, "Property title / street address")
+                Field(suburb, { suburb = it }, "Suburb / area")
+                Field(price, { price = it }, "Asking price", KeyboardType.Number)
+            }
+            1 -> {
+                FormTitle("Property details", "Add the key details buyers scan first.")
+                ChoiceRow(listOf("House", "Apartment", "Townhouse", "Land"), type) { type = it }
+                Field(bedrooms, { bedrooms = it }, "Bedrooms", KeyboardType.Number)
+                Field(bathrooms, { bathrooms = it }, "Bathrooms", KeyboardType.Number)
+                ChoiceRow(listOf("Active", "Draft"), status) { status = it }
+            }
+            2 -> {
+                FormTitle("Seller", "Keep the owner linked to the listing.")
+                Field(sellerName, { sellerName = it }, "Seller name")
+                Field(sellerPhone, { sellerPhone = it }, "Seller phone", KeyboardType.Phone)
+                Field(notes, { notes = it }, "Notes", minLines = 4)
+            }
+            else -> {
+                FormTitle("Review", "Check the listing before saving.")
+                ReviewLine("Property", title)
+                ReviewLine("Area", suburb)
+                ReviewLine("Price", money(price.toDoubleOrNull() ?: 0.0))
+                ReviewLine("Type", type)
+                ReviewLine("Bedrooms", bedrooms.ifBlank { "0" })
+                ReviewLine("Bathrooms", bathrooms.ifBlank { "0" })
+                ReviewLine("Status", status)
+                ReviewLine("Seller", sellerName.ifBlank { "Not added" })
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        Row {
+            if (step > 0) {
+                OutlinedButton(onClick = { step-- }, modifier = Modifier.weight(1f)) { Text("Back") }
+                Spacer(Modifier.width(10.dp))
+            }
+            if (step < 3) {
+                Button(
+                    onClick = { step++ },
+                    enabled = if (step == 0) title.isNotBlank() && suburb.isNotBlank() && (price.toDoubleOrNull() ?: 0.0) > 0 else true,
+                    modifier = Modifier.weight(1f)
+                ) { Text("Continue") }
+            } else {
+                Button(
+                    onClick = {
+                        onSave(PropertyItem(
+                            id = System.currentTimeMillis().toString(),
+                            title = title.trim(),
+                            suburb = suburb.trim(),
+                            price = price.toDoubleOrNull() ?: 0.0,
+                            bedrooms = bedrooms.toIntOrNull() ?: 0,
+                            bathrooms = bathrooms.toIntOrNull() ?: 0,
+                            propertyType = type,
+                            status = status,
+                            sellerName = sellerName.trim(),
+                            sellerPhone = sellerPhone.trim(),
+                            notes = notes.trim()
+                        ))
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.Save, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Save property")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddContactScreen(onBack: () -> Unit, onSave: (ContactItem) -> Unit) {
+    var name by rememberSaveable { mutableStateOf("") }
+    var phone by rememberSaveable { mutableStateOf("") }
+    var email by rememberSaveable { mutableStateOf("") }
+    var role by rememberSaveable { mutableStateOf("Buyer") }
+    var budget by rememberSaveable { mutableStateOf("") }
+    var area by rememberSaveable { mutableStateOf("") }
+    var notes by rememberSaveable { mutableStateOf("") }
+
+    PageScaffold("Add contact", "Capture a buyer or seller", onBack) {
+        FormTitle("Contact details", "Save enough information to make the next follow-up easy.")
+        ChoiceRow(listOf("Buyer", "Seller"), role) { role = it }
+        Field(name, { name = it }, "Full name")
+        Field(phone, { phone = it }, "Phone / WhatsApp", KeyboardType.Phone)
+        Field(email, { email = it }, "Email", KeyboardType.Email)
+        Field(area, { area = it }, if (role == "Buyer") "Preferred area" else "Property area")
+        if (role == "Buyer") Field(budget, { budget = it }, "Budget", KeyboardType.Number)
+        Field(notes, { notes = it }, "Notes", minLines = 4)
+        Button(
+            onClick = {
+                onSave(ContactItem(
+                    id = System.currentTimeMillis().toString(),
+                    name = name.trim(),
+                    phone = phone.trim(),
+                    email = email.trim(),
+                    role = role,
+                    budget = budget.toDoubleOrNull() ?: 0.0,
+                    area = area.trim(),
+                    notes = notes.trim()
+                ))
+            },
+            enabled = name.isNotBlank() && phone.isNotBlank(),
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+        ) {
+            Icon(Icons.Default.Save, null)
+            Spacer(Modifier.width(8.dp))
+            Text("Save contact")
+        }
+    }
+}
+
+@Composable
+private fun ScheduleViewingScreen(state: AgentState, onBack: () -> Unit, onSave: (ViewingItem) -> Unit) {
+    var propertyName by rememberSaveable { mutableStateOf(state.properties.firstOrNull()?.title ?: "") }
+    var contactName by rememberSaveable { mutableStateOf(state.contacts.firstOrNull()?.name ?: "") }
+    var date by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
+    var time by rememberSaveable { mutableStateOf("10:00") }
+    var notes by rememberSaveable { mutableStateOf("") }
+
+    PageScaffold("Schedule viewing", "Book the appointment and keep it visible", onBack) {
+        if (state.properties.isEmpty()) {
+            EmptyCard("Add a property first", "A viewing needs a property.")
+        } else {
+            FormTitle("Viewing details", "Use your saved listing and contact information.")
+            Field(propertyName, { propertyName = it }, "Property")
+            if (state.properties.size > 1) ChoiceRow(state.properties.take(3).map { it.title }, propertyName) { propertyName = it }
+            Field(contactName, { contactName = it }, "Buyer / contact")
+            Field(date, { date = it }, "Date (YYYY-MM-DD)")
+            Field(time, { time = it }, "Time (HH:MM)")
+            Field(notes, { notes = it }, "Notes", minLines = 3)
+            Button(
+                onClick = {
+                    onSave(ViewingItem(
+                        id = System.currentTimeMillis().toString(),
+                        propertyName = propertyName.trim(),
+                        contactName = contactName.trim(),
+                        date = date.trim(),
+                        time = time.trim(),
+                        notes = notes.trim(),
+                        status = "Scheduled"
+                    ))
+                },
+                enabled = propertyName.isNotBlank() && date.isNotBlank() && time.isNotBlank(),
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+            ) {
+                Icon(Icons.Default.EventAvailable, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Schedule viewing")
+            }
+        }
+    }
+}
+
+@Composable
+private fun PropertyDetailScreen(
+    property: PropertyItem,
+    onBack: () -> Unit,
+    onStatus: (String) -> Unit,
+    onDelete: () -> Unit,
+    onMarketing: () -> Unit,
+    onSellerReport: () -> Unit
+) {
+    var confirmDelete by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    PageScaffold(property.title, property.suburb, onBack) {
+        Card(colors = CardDefaults.cardColors(containerColor = Ink), shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(22.dp)) {
+                StatusPill(property.status, true)
+                Text(money(property.price), fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(top = 12.dp))
+                Text(property.bedrooms.toString() + " bed • " + property.bathrooms + " bath • " + property.propertyType, color = Color.White.copy(alpha = .78f))
+            }
+        }
+        SectionTitle("Property")
+        ReviewLine("Status", property.status)
+        ReviewLine("Seller", property.sellerName.ifBlank { "Not added" })
+        ReviewLine("Phone", property.sellerPhone.ifBlank { "Not added" })
+        if (property.notes.isNotBlank()) ReviewLine("Notes", property.notes)
+        Row(Modifier.padding(top = 12.dp)) {
+            Button(onClick = onMarketing, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Default.AutoAwesome, null); Spacer(Modifier.width(6.dp)); Text("Marketing")
+            }
+            Spacer(Modifier.width(8.dp))
+            OutlinedButton(onClick = onSellerReport, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Default.PictureAsPdf, null); Spacer(Modifier.width(6.dp)); Text("Report")
+            }
+        }
+        if (property.sellerPhone.isNotBlank()) {
+            Button(
+                onClick = { whatsapp(context, property.sellerPhone) },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F8B4C))
+            ) {
+                Icon(Icons.Default.Chat, null); Spacer(Modifier.width(8.dp)); Text("WhatsApp seller")
+            }
+        }
+        SectionTitle("Listing status")
+        ChoiceRow(listOf("Active", "Draft", "Offer", "Sold"), property.status, onStatus)
+        OutlinedButton(onClick = { confirmDelete = true }, modifier = Modifier.fillMaxWidth().padding(top = 20.dp)) {
+            Icon(Icons.Default.DeleteOutline, null); Spacer(Modifier.width(8.dp)); Text("Delete property")
+        }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete property?") },
+            text = { Text("This removes the property from this device.") },
+            confirmButton = { TextButton(onClick = onDelete) { Text("Delete") } },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } }
+        )
+    }
+}
+
+@Composable
+private fun CommissionScreen(onBack: () -> Unit) {
+    var price by rememberSaveable { mutableStateOf("") }
+    var rate by rememberSaveable { mutableStateOf("5") }
+    var addVat by rememberSaveable { mutableStateOf(true) }
+    val p = price.toDoubleOrNull() ?: 0.0
+    val r = rate.toDoubleOrNull() ?: 0.0
+    val commission = p * r / 100
+    val vat = if (addVat) commission * 0.15 else 0.0
+    val total = commission + vat
+
+    PageScaffold("Commission calculator", "Fast deal calculation", onBack) {
+        Field(price, { price = it }, "Sale price", KeyboardType.Number)
+        Field(rate, { rate = it }, "Commission %", KeyboardType.Decimal)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
+            Switch(checked = addVat, onCheckedChange = { addVat = it })
+            Text("Add 15% VAT to commission", Modifier.padding(start = 10.dp), color = Ink)
+        }
+        Card(colors = CardDefaults.cardColors(containerColor = Ink), shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+            Column(Modifier.padding(22.dp)) {
+                Text("COMMISSION", color = Color.White.copy(alpha = .65f), fontWeight = FontWeight.Bold)
+                Text(money(commission), color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                if (addVat) Text("VAT " + money(vat), color = Color.White.copy(alpha = .75f))
+                Text("Total " + money(total), color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MarketingStudioScreen(properties: List<PropertyItem>, selectedPropertyId: String?, onBack: () -> Unit) {
+    val context = LocalContext.current
+    var selected by rememberSaveable { mutableStateOf(selectedPropertyId ?: properties.firstOrNull()?.id) }
+    val property = properties.firstOrNull { it.id == selected }
+    val copy = property?.let {
+        it.title + ", " + it.suburb + "\n" +
+            money(it.price) + "\n" +
+            it.bedrooms + " bedrooms • " + it.bathrooms + " bathrooms • " + it.propertyType + "\n\n" +
+            it.notes.ifBlank { "A well-positioned property ready for its next owner." } +
+            "\n\nContact me to arrange a viewing."
+    } ?: ""
+
+    PageScaffold("Marketing Studio", "Create clean listing copy in seconds", onBack) {
+        if (properties.isEmpty()) {
+            EmptyCard("No properties yet", "Add a property before creating marketing copy.")
+        } else {
+            FormTitle("Choose property", "Tap a listing to generate its marketing text.")
+            properties.take(6).forEach { item ->
+                OutlinedButton(
+                    onClick = { selected = item.id },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                    colors = if (selected == item.id) ButtonDefaults.outlinedButtonColors(containerColor = BrandSoft) else ButtonDefaults.outlinedButtonColors()
+                ) {
+                    Text(item.title + " • " + item.suburb, modifier = Modifier.weight(1f))
+                    if (selected == item.id) Icon(Icons.Default.Check, null)
+                }
+            }
+            Card(Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                Text(copy, Modifier.padding(18.dp), color = Ink)
+            }
+            Row(Modifier.padding(top = 12.dp)) {
+                OutlinedButton(onClick = { copyText(context, copy) }, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Default.ContentCopy, null); Spacer(Modifier.width(6.dp)); Text("Copy")
+                }
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = { shareText(context, "Property listing", copy) }, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Default.Share, null); Spacer(Modifier.width(6.dp)); Text("Share")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SellerReportScreen(properties: List<PropertyItem>, viewings: List<ViewingItem>, selectedPropertyId: String?, onBack: () -> Unit) {
+    val context = LocalContext.current
+    var selected by rememberSaveable { mutableStateOf(selectedPropertyId ?: properties.firstOrNull()?.id) }
+    val property = properties.firstOrNull { it.id == selected }
+
+    PageScaffold("Seller report", "A clear property activity summary", onBack) {
+        if (properties.isEmpty()) {
+            EmptyCard("No properties yet", "Add a property before generating a seller summary.")
+        } else {
+            properties.take(6).forEach { item ->
+                OutlinedButton(
+                    onClick = { selected = item.id },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                    colors = if (selected == item.id) ButtonDefaults.outlinedButtonColors(containerColor = BrandSoft) else ButtonDefaults.outlinedButtonColors()
+                ) {
+                    Text(item.title, modifier = Modifier.weight(1f))
+                    if (selected == item.id) Icon(Icons.Default.Check, null)
+                }
+            }
+            property?.let { p ->
+                val related = viewings.filter { it.propertyName.equals(p.title, true) }
+                val completed = related.count { it.status == "Completed" }
+                val report = "SELLER PROPERTY UPDATE\n\nProperty: " + p.title +
+                    "\nArea: " + p.suburb +
+                    "\nAsking price: " + money(p.price) +
+                    "\nStatus: " + p.status +
+                    "\n\nViewings scheduled: " + related.size +
+                    "\nViewings completed: " + completed +
+                    "\n\nAgent note: " + p.notes.ifBlank { "No additional notes recorded." }
+
+                Card(Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                    Text(report, Modifier.padding(18.dp), color = Ink)
+                }
+                Button(onClick = { shareText(context, "Seller report - " + p.title, report) }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                    Icon(Icons.Default.Share, null); Spacer(Modifier.width(8.dp)); Text("Share seller update")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PipelineScreen(properties: List<PropertyItem>, onBack: () -> Unit) {
+    PageScaffold("Deal pipeline", "Track every listing from draft to sold", onBack) {
+        listOf("Draft", "Active", "Offer", "Sold").forEach { stage ->
+            val items = properties.filter { it.status == stage }
+            Text(stage.uppercase(), color = Muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
+            if (items.isEmpty()) {
+                Text("No properties", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
+            } else {
+                items.forEach {
+                    Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(it.title, fontWeight = FontWeight.SemiBold, color = Ink)
+                                Text(it.suburb, color = Muted, fontSize = 12.sp)
+                            }
+                            Text(money(it.price), color = Brand, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Header(title: String, subtitle: String) {
     Column(Modifier.padding(20.dp, 22.dp, 20.dp, 12.dp)) {
         Text(title, fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Ink)
         Text(subtitle, color = Muted, fontSize = 14.sp)
@@ -115,243 +745,217 @@ fun Header(title: String, subtitle: String) {
 }
 
 @Composable
-fun Home(open: (Page) -> Unit) {
-    Column(Modifier.verticalScroll(rememberScrollState())) {
-        Header("Good morning", "Your property business, simplified")
-        CardBlock("PIPELINE", "R 8.45m", "12 active properties") {
-            open(Page("Pipeline", "Track every deal from lead to sold", Icons.Default.TrendingUp))
-        }
-
-        Text(
-            "TODAY",
-            Modifier.padding(20.dp, 18.dp, 20.dp, 8.dp),
-            fontWeight = FontWeight.Bold,
-            color = Muted
-        )
-
-        Row(Modifier.padding(horizontal = 14.dp)) {
-            Mini("4", "Viewings", Icons.Default.Visibility) {
-                open(Page("Viewings", "Manage upcoming property viewings", Icons.Default.Visibility))
-            }
-            Mini("7", "Follow-ups", Icons.Default.Notifications) {
-                open(Page("Follow-ups", "Never lose a warm lead", Icons.Default.Notifications))
-            }
-        }
-
-        Section(
-            "Quick actions",
-            listOf(
-                Page("Add property", "Create a new property listing", Icons.Default.AddHome),
-                Page("Add lead", "Capture a buyer or seller", Icons.Default.PersonAdd),
-                Page("Marketing Studio", "Create branded property marketing", Icons.Default.AutoAwesome),
-                Page("Seller report", "Generate a professional owner update", Icons.Default.PictureAsPdf)
-            ),
-            open
-        )
-    }
-}
-
-@Composable
-fun Properties(open: (Page) -> Unit) {
-    Column {
-        Header("Properties", "12 active • 3 drafts")
-        Search()
-        Section(
-            "Portfolio",
-            listOf(
-                Page("Active listings", "Properties currently on the market", Icons.Default.HomeWork),
-                Page("Drafts", "Finish incomplete listings", Icons.Default.EditNote),
-                Page("On show", "Upcoming show properties", Icons.Default.Event),
-                Page("Offers", "Track offers and negotiations", Icons.Default.Handshake),
-                Page("Sold & archived", "Your completed business", Icons.Default.TaskAlt),
-                Page("Add property", "Basics → Location → Features → Photos → Seller → Mandate", Icons.Default.AddHome)
-            ),
-            open
-        )
-    }
-}
-
-@Composable
-fun Leads(open: (Page) -> Unit) {
-    Column {
-        Header("Leads & CRM", "Keep every relationship moving")
-        Search()
-        Section(
-            "Contacts",
-            listOf(
-                Page("Hot leads", "People requiring attention now", Icons.Default.LocalFireDepartment),
-                Page("Buyers", "Requirements, budgets and matches", Icons.Default.PersonSearch),
-                Page("Sellers", "Owners, mandates and communication", Icons.Default.RealEstateAgent),
-                Page("Buyer matcher", "Match requirements to your listings", Icons.Default.CompareArrows),
-                Page("Follow-ups", "Calls, WhatsApps and next actions", Icons.Default.PhoneInTalk),
-                Page("Add contact", "Capture a new buyer or seller", Icons.Default.PersonAdd)
-            ),
-            open
-        )
-    }
-}
-
-@Composable
-fun Calendar(open: (Page) -> Unit) {
-    Column {
-        Header("Calendar", "Friday, 2 October")
-        Section(
-            "Schedule",
-            listOf(
-                Page("Today's viewings", "4 appointments scheduled", Icons.Default.Visibility),
-                Page("Tasks", "7 actions to complete", Icons.Default.CheckCircle),
-                Page("Reminders", "Follow-ups and mandate dates", Icons.Default.Alarm),
-                Page("Schedule viewing", "Property → Buyer → Date & time", Icons.Default.AddCircle),
-                Page("Viewing feedback", "Interested • Maybe • Not interested", Icons.Default.RateReview)
-            ),
-            open
-        )
-    }
-}
-
-@Composable
-fun More(open: (Page) -> Unit) {
-    Column(Modifier.verticalScroll(rememberScrollState())) {
-        Header("AgentKit SA", "Your professional toolkit")
-        Section(
-            "Business",
-            listOf(
-                Page("Marketing Studio", "Social posts, story cards and listing copy", Icons.Default.AutoAwesome),
-                Page("Documents", "Mandates, IDs and property documents", Icons.Default.Folder),
-                Page("Seller Reports", "Enquiries, viewings, feedback and offers", Icons.Default.PictureAsPdf),
-                Page("Deal pipeline", "Lead → Mandate → Offer → Sold", Icons.Default.AccountTree),
-                Page("Commission calculator", "Estimate commission and earnings", Icons.Default.Calculate),
-                Page("Expenses & mileage", "Record business costs and travel", Icons.Default.ReceiptLong),
-                Page("Agent branding", "Logo, profile, agency and contact details", Icons.Default.Palette),
-                Page("Settings", "Security, backup, export and preferences", Icons.Default.Settings)
-            ),
-            open
-        )
-    }
-}
-
-@Composable
-fun Detail(page: Page, back: () -> Unit) {
+private fun PageScaffold(title: String, subtitle: String, onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Row(
-            Modifier.padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = back) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-            }
-            Text(page.title, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Ink)
-        }
-
-        Box(
-            Modifier
-                .padding(20.dp)
-                .fillMaxWidth()
-                .background(Color.White, RoundedCornerShape(24.dp))
-                .padding(24.dp)
-        ) {
+        Row(Modifier.padding(8.dp, 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
             Column {
-                Icon(page.icon, contentDescription = null, tint = Brand, modifier = Modifier.size(42.dp))
-                Spacer(Modifier.height(16.dp))
-                Text(page.title, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Ink)
-                Text(page.subtitle, Modifier.padding(top = 6.dp), color = Muted)
-                Spacer(Modifier.height(22.dp))
-                Text("UI WORKSPACE", fontWeight = FontWeight.Bold, color = Brand)
-                Text(
-                    "This page is linked and ready for its detailed workflow, fields and actions.",
-                    Modifier.padding(top = 8.dp),
-                    color = Muted
-                )
+                Text(title, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Text(subtitle, color = Muted, fontSize = 12.sp)
             }
         }
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), content = content)
+        Spacer(Modifier.height(24.dp))
     }
 }
 
 @Composable
-fun Section(title: String, items: List<Page>, open: (Page) -> Unit) {
-    Column(Modifier.padding(14.dp)) {
-        Text(
-            title.uppercase(),
-            Modifier.padding(6.dp, 12.dp),
-            fontWeight = FontWeight.Bold,
-            color = Muted
-        )
-        items.forEach { item ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp)
-                    .background(Color.White, RoundedCornerShape(18.dp))
-                    .clickable { open(item) }
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    Modifier
-                        .size(44.dp)
-                        .background(Brand.copy(alpha = 0.10f), RoundedCornerShape(14.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(item.icon, contentDescription = null, tint = Brand)
-                }
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .padding(horizontal = 14.dp)
-                ) {
-                    Text(item.title, fontWeight = FontWeight.SemiBold, color = Ink)
-                    Text(item.subtitle, fontSize = 12.sp, color = Muted)
-                }
-                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = Muted)
-            }
-        }
-    }
+private fun EmptyScreen(message: String, onBack: () -> Unit) {
+    PageScaffold("AgentKit", "", onBack) { EmptyCard(message, "Return and try again.") }
 }
 
 @Composable
-fun CardBlock(label: String, value: String, subtitle: String, onClick: () -> Unit) {
-    Column(
-        Modifier
-            .padding(horizontal = 20.dp)
-            .fillMaxWidth()
-            .background(Ink, RoundedCornerShape(24.dp))
-            .clickable(onClick = onClick)
-            .padding(22.dp)
+private fun PropertyCard(item: PropertyItem, onClick: () -> Unit) {
+    Card(
+        Modifier.padding(horizontal = 20.dp, vertical = 6.dp).fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
     ) {
-        Text(label, color = Color.White.copy(alpha = 0.65f), fontWeight = FontWeight.Bold)
+        Column(Modifier.padding(18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(52.dp).background(BrandSoft, RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.HomeWork, null, tint = Brand)
+                }
+                Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                    Text(item.title, fontWeight = FontWeight.Bold, color = Ink, fontSize = 17.sp)
+                    Text(item.suburb, color = Muted, fontSize = 13.sp)
+                }
+                StatusPill(item.status)
+            }
+            Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(money(item.price), fontWeight = FontWeight.Bold, color = Ink, fontSize = 20.sp, modifier = Modifier.weight(1f))
+                Text(item.bedrooms.toString() + " bed • " + item.bathrooms + " bath", color = Muted, fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionTile(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit) {
+    Row(
+        Modifier.padding(horizontal = 20.dp, vertical = 4.dp).fillMaxWidth()
+            .background(Color.White, RoundedCornerShape(18.dp)).clickable(onClick = onClick).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(44.dp).background(BrandSoft, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = Brand)
+        }
+        Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+            Text(title, fontWeight = FontWeight.SemiBold, color = Ink)
+            Text(subtitle, color = Muted, fontSize = 12.sp)
+        }
+        Icon(Icons.Default.ChevronRight, null, tint = Muted)
+    }
+}
+
+@Composable
+private fun CardBlock(label: String, value: String, subtitle: String, onClick: () -> Unit) {
+    Column(
+        Modifier.padding(horizontal = 20.dp).fillMaxWidth().background(Ink, RoundedCornerShape(24.dp))
+            .clickable(onClick = onClick).padding(22.dp)
+    ) {
+        Text(label, color = Color.White.copy(alpha = .65f), fontWeight = FontWeight.Bold)
         Text(value, color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
-        Text(subtitle, color = Color.White.copy(alpha = 0.80f))
+        Text(subtitle, color = Color.White.copy(alpha = .8f))
     }
 }
 
 @Composable
-fun RowScope.Mini(number: String, label: String, icon: ImageVector, onClick: () -> Unit) {
+private fun RowScope.Metric(number: String, label: String, icon: ImageVector, onClick: () -> Unit) {
     Column(
-        Modifier
-            .weight(1f)
-            .padding(6.dp)
-            .background(Color.White, RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick)
-            .padding(18.dp)
+        Modifier.weight(1f).padding(6.dp).background(Color.White, RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick).padding(18.dp)
     ) {
-        Icon(icon, contentDescription = null, tint = Brand)
+        Icon(icon, null, tint = Brand)
         Text(number, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Ink)
         Text(label, color = Muted)
     }
 }
 
 @Composable
-fun Search() {
-    var value by remember { mutableStateOf("") }
+private fun SearchField(value: String, onChange: (String) -> Unit, placeholder: String) {
     OutlinedTextField(
         value = value,
-        onValueChange = { value = it },
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp),
-        placeholder = { Text("Search") },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+        onValueChange = onChange,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+        placeholder = { Text(placeholder) },
+        leadingIcon = { Icon(Icons.Default.Search, null) },
         singleLine = true,
         shape = RoundedCornerShape(16.dp)
     )
+}
+
+@Composable
+private fun ChoiceRow(options: List<String>, selected: String, onSelected: (String) -> Unit) {
+    Column(Modifier.padding(vertical = 6.dp)) {
+        options.chunked(2).forEach { row ->
+            Row(Modifier.fillMaxWidth()) {
+                row.forEach { option ->
+                    val active = option == selected
+                    OutlinedButton(
+                        onClick = { onSelected(option) },
+                        modifier = Modifier.weight(1f).padding(3.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(containerColor = if (active) BrandSoft else Color.Transparent)
+                    ) {
+                        if (active) {
+                            Icon(Icons.Default.Check, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Text(option, maxLines = 1)
+                    }
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun Field(value: String, onChange: (String) -> Unit, label: String, keyboardType: KeyboardType = KeyboardType.Text, minLines: Int = 1) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text(label) },
+        modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        minLines = minLines,
+        singleLine = minLines == 1,
+        shape = RoundedCornerShape(14.dp)
+    )
+}
+
+@Composable
+private fun FormTitle(title: String, subtitle: String) {
+    Text(title, color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+    Text(subtitle, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(bottom = 12.dp))
+}
+
+@Composable
+private fun ReviewLine(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.Top) {
+        Text(label, color = Muted, modifier = Modifier.width(105.dp), fontSize = 13.sp)
+        Text(value, color = Ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+    }
+    HorizontalDivider(color = Border)
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(text.uppercase(), color = Muted, fontWeight = FontWeight.Bold, modifier = Modifier.padding(20.dp, 20.dp, 20.dp, 8.dp), fontSize = 12.sp)
+}
+
+@Composable
+private fun EmptyCard(title: String, subtitle: String) {
+    Column(
+        Modifier.padding(20.dp, 10.dp).fillMaxWidth().background(Color.White, RoundedCornerShape(20.dp)).padding(20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(Icons.Default.Inbox, null, tint = Brand, modifier = Modifier.size(36.dp))
+        Text(title, fontWeight = FontWeight.Bold, color = Ink, modifier = Modifier.padding(top = 8.dp))
+        Text(subtitle, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+@Composable
+private fun StatusPill(status: String, light: Boolean = false) {
+    val bg = if (light) Color.White.copy(alpha = .14f) else BrandSoft
+    val fg = if (light) Color.White else Brand
+    Box(Modifier.background(bg, RoundedCornerShape(30.dp)).padding(horizontal = 10.dp, vertical = 5.dp)) {
+        Text(status, color = fg, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+private fun money(value: Double): String {
+    val format = NumberFormat.getCurrencyInstance(Locale("en", "ZA"))
+    format.maximumFractionDigits = 0
+    return format.format(value)
+}
+
+private fun dial(context: Context, phone: String) {
+    if (phone.isBlank()) return
+    context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(phone))))
+}
+
+private fun whatsapp(context: Context, phone: String) {
+    val digits = phone.filter { it.isDigit() }
+    val normalized = when {
+        digits.startsWith("0") -> "27" + digits.drop(1)
+        digits.startsWith("27") -> digits
+        else -> digits
+    }
+    if (normalized.isNotBlank()) context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/" + normalized)))
+}
+
+private fun copyText(context: Context, text: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText("AgentKit", text))
+}
+
+private fun shareText(context: Context, subject: String, text: String) {
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, subject)
+        putExtra(Intent.EXTRA_TEXT, text)
+    }
+    context.startActivity(Intent.createChooser(intent, "Share with"))
 }
