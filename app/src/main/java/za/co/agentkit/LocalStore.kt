@@ -22,7 +22,14 @@ class LocalStore(context: Context) {
                 status = o.optString("status", "Active"),
                 sellerName = o.optString("sellerName"),
                 sellerPhone = o.optString("sellerPhone"),
-                notes = o.optString("notes")
+                notes = o.optString("notes"),
+                address = o.optString("address"),
+                city = o.optString("city"),
+                province = o.optString("province"),
+                postalCode = o.optString("postalCode"),
+                latitude = o.optDouble("latitude", 0.0),
+                longitude = o.optDouble("longitude", 0.0),
+                googlePlaceId = o.optString("googlePlaceId")
             )
         }
     }.getOrDefault(emptyList())
@@ -43,6 +50,13 @@ class LocalStore(context: Context) {
                     .put("sellerName", p.sellerName)
                     .put("sellerPhone", p.sellerPhone)
                     .put("notes", p.notes)
+                    .put("address", p.address)
+                    .put("city", p.city)
+                    .put("province", p.province)
+                    .put("postalCode", p.postalCode)
+                    .put("latitude", p.latitude)
+                    .put("longitude", p.longitude)
+                    .put("googlePlaceId", p.googlePlaceId)
             )
         }
         prefs.edit().putString("properties", array.toString()).apply()

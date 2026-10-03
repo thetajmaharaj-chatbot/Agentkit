@@ -11,7 +11,14 @@ data class PropertyItem(
     val status: String,
     val sellerName: String,
     val sellerPhone: String,
-    val notes: String
+    val notes: String,
+    val address: String = "",
+    val city: String = "",
+    val province: String = "",
+    val postalCode: String = "",
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0,
+    val googlePlaceId: String = ""
 )
 
 data class ContactItem(

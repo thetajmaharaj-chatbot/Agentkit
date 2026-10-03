@@ -207,7 +207,14 @@ private fun HomeScreen(state: AgentState, open: (String) -> Unit, openProperty: 
 private fun PropertiesScreen(state: AgentState, openAdd: () -> Unit, openProperty: (String) -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     val filtered = state.properties.filter {
-        query.isBlank() || it.title.contains(query, true) || it.suburb.contains(query, true) || it.status.contains(query, true)
+        query.isBlank() ||
+            it.title.contains(query, true) ||
+            it.suburb.contains(query, true) ||
+            it.address.contains(query, true) ||
+            it.city.contains(query, true) ||
+            it.province.contains(query, true) ||
+            it.postalCode.contains(query, true) ||
+            it.status.contains(query, true)
     }
     Column {
         Header("Properties", "${state.properties.size} properties")
@@ -374,7 +381,14 @@ private fun QuickAddScreen(onBack: () -> Unit, open: (String) -> Unit) {
 private fun AddPropertyScreen(onBack: () -> Unit, onSave: (PropertyItem) -> Unit) {
     var step by rememberSaveable { mutableIntStateOf(0) }
     var title by rememberSaveable { mutableStateOf("") }
+    var address by rememberSaveable { mutableStateOf("") }
     var suburb by rememberSaveable { mutableStateOf("") }
+    var city by rememberSaveable { mutableStateOf("") }
+    var province by rememberSaveable { mutableStateOf("") }
+    var postalCode by rememberSaveable { mutableStateOf("") }
+    var latitude by rememberSaveable { mutableDoubleStateOf(0.0) }
+    var longitude by rememberSaveable { mutableDoubleStateOf(0.0) }
+    var googlePlaceId by rememberSaveable { mutableStateOf("") }
     var price by rememberSaveable { mutableStateOf("") }
     var bedrooms by rememberSaveable { mutableStateOf("") }
     var bathrooms by rememberSaveable { mutableStateOf("") }
@@ -388,9 +402,35 @@ private fun AddPropertyScreen(onBack: () -> Unit, onSave: (PropertyItem) -> Unit
         LinearProgressIndicator(progress = { (step + 1) / 4f }, modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp))
         when (step) {
             0 -> {
-                FormTitle("Basics", "Start with the property identity and asking price.")
-                Field(title, { title = it }, "Property title / street address")
+                FormTitle("Location & price", "Find the address with Google or enter it manually.")
+                GoogleAddressPicker(
+                    currentQuery = address.ifBlank { title },
+                    onSelected = { selected ->
+                        title = selected.title.ifBlank { title }
+                        address = selected.address
+                        if (selected.suburb.isNotBlank()) suburb = selected.suburb
+                        if (selected.city.isNotBlank()) city = selected.city
+                        if (selected.province.isNotBlank()) province = selected.province
+                        if (selected.postalCode.isNotBlank()) postalCode = selected.postalCode
+                        latitude = selected.latitude
+                        longitude = selected.longitude
+                        googlePlaceId = selected.placeId
+                    }
+                )
+                Field(title, { title = it }, "Property title / street")
+                Field(address, { address = it }, "Full address")
                 Field(suburb, { suburb = it }, "Suburb / area")
+                Field(city, { city = it }, "City / town")
+                Field(province, { province = it }, "Province")
+                Field(postalCode, { postalCode = it }, "Postal code")
+                if (latitude != 0.0 || longitude != 0.0) {
+                    Text(
+                        "Google location: %.5f, %.5f".format(latitude, longitude),
+                        color = Muted,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
                 Field(price, { price = it }, "Asking price", KeyboardType.Number)
             }
             1 -> {
@@ -409,7 +449,9 @@ private fun AddPropertyScreen(onBack: () -> Unit, onSave: (PropertyItem) -> Unit
             else -> {
                 FormTitle("Review", "Check the listing before saving.")
                 ReviewLine("Property", title)
-                ReviewLine("Area", suburb)
+                ReviewLine("Address", address.ifBlank { "Not added" })
+                ReviewLine("Area", listOf(suburb, city, province, postalCode).filter { it.isNotBlank() }.joinToString(", ").ifBlank { "Not added" })
+                if (latitude != 0.0 || longitude != 0.0) ReviewLine("GPS", "%.5f, %.5f".format(latitude, longitude))
                 ReviewLine("Price", money(price.toDoubleOrNull() ?: 0.0))
                 ReviewLine("Type", type)
                 ReviewLine("Bedrooms", bedrooms.ifBlank { "0" })
@@ -444,7 +486,14 @@ private fun AddPropertyScreen(onBack: () -> Unit, onSave: (PropertyItem) -> Unit
                             status = status,
                             sellerName = sellerName.trim(),
                             sellerPhone = sellerPhone.trim(),
-                            notes = notes.trim()
+                            notes = notes.trim(),
+                            address = address.trim(),
+                            city = city.trim(),
+                            province = province.trim(),
+                            postalCode = postalCode.trim(),
+                            latitude = latitude,
+                            longitude = longitude,
+                            googlePlaceId = googlePlaceId
                         ))
                     },
                     modifier = Modifier.weight(1f)
@@ -563,9 +612,22 @@ private fun PropertyDetailScreen(
         }
         SectionTitle("Property")
         ReviewLine("Status", property.status)
+        if (property.address.isNotBlank()) ReviewLine("Address", property.address)
+        ReviewLine("Area", listOf(property.suburb, property.city, property.province, property.postalCode).filter { it.isNotBlank() }.joinToString(", ").ifBlank { property.suburb })
+        if (property.latitude != 0.0 || property.longitude != 0.0) ReviewLine("GPS", "%.5f, %.5f".format(property.latitude, property.longitude))
         ReviewLine("Seller", property.sellerName.ifBlank { "Not added" })
         ReviewLine("Phone", property.sellerPhone.ifBlank { "Not added" })
         if (property.notes.isNotBlank()) ReviewLine("Notes", property.notes)
+        if (property.address.isNotBlank() || property.latitude != 0.0 || property.longitude != 0.0) {
+            OutlinedButton(
+                onClick = { GooglePlacesService.openMaps(context, property) },
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+            ) {
+                Icon(Icons.Default.Map, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Open in Google Maps")
+            }
+        }
         Row(Modifier.padding(top = 12.dp)) {
             Button(onClick = onMarketing, modifier = Modifier.weight(1f)) {
                 Icon(Icons.Default.AutoAwesome, null); Spacer(Modifier.width(6.dp)); Text("Marketing")
