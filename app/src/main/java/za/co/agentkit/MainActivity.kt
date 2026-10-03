@@ -151,6 +151,8 @@ fun AgentKit(state: AgentState) {
                     }
                 )
                 "commission" -> CommissionScreen { route = null }
+                "documents" -> DocumentVaultScreen { route = null }
+                "voice_notes" -> VoiceNotesScreen { route = null }
                 "marketing" -> MarketingStudioScreen(state.properties, selectedPropertyId) { route = null }
                 "seller_report" -> SellerReportScreen(state.properties, state.viewings, selectedPropertyId) { route = null }
                 "pipeline" -> PipelineScreen(state.properties) { route = null }
@@ -349,7 +351,8 @@ private fun MoreScreen(open: (String) -> Unit) {
         ActionTile("Commission calculator", "Calculate commission and VAT", Icons.Default.Calculate) { open("commission") }
         ActionTile("Marketing Studio", "Generate property listing copy", Icons.Default.AutoAwesome) { open("marketing") }
         ActionTile("Seller report", "Build a seller activity summary", Icons.Default.PictureAsPdf) { open("seller_report") }
-        ActionTile("Documents", "Mandates, IDs and supporting documents", Icons.Default.Folder) { }
+        ActionTile("Documents", "View PDFs, DOCX, XLSX, images, text and CSV files", Icons.Default.Folder) { open("documents") }
+        ActionTile("Voice notes", "Record and replay private agent voice memos", Icons.Default.Mic) { open("voice_notes") }
         ActionTile("Agent branding", "Agency logo and agent profile", Icons.Default.Palette) { }
         ActionTile("Settings", "Security, backup and preferences", Icons.Default.Settings) { }
         Spacer(Modifier.height(24.dp))
@@ -362,6 +365,8 @@ private fun QuickAddScreen(onBack: () -> Unit, open: (String) -> Unit) {
         ActionTile("Property", "Capture a listing", Icons.Default.AddHome) { open("add_property") }
         ActionTile("Contact", "Add a buyer or seller", Icons.Default.PersonAdd) { open("add_contact") }
         ActionTile("Viewing", "Schedule a property viewing", Icons.Default.EventAvailable) { open("schedule_viewing") }
+        ActionTile("Document", "Import a property or client document", Icons.Default.UploadFile) { open("documents") }
+        ActionTile("Voice note", "Record a quick private memo", Icons.Default.Mic) { open("voice_notes") }
     }
 }
 
@@ -570,6 +575,19 @@ private fun PropertyDetailScreen(
                 Icon(Icons.Default.PictureAsPdf, null); Spacer(Modifier.width(6.dp)); Text("Report")
             }
         }
+        Button(
+            onClick = {
+                runCatching {
+                    val file = PdfExporter.propertyProfile(context, property)
+                    PdfExporter.share(context, file, "Property profile - " + property.title)
+                }
+            },
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+        ) {
+            Icon(Icons.Default.PictureAsPdf, null)
+            Spacer(Modifier.width(8.dp))
+            Text("Export property PDF")
+        }
         if (property.sellerPhone.isNotBlank()) {
             Button(
                 onClick = { whatsapp(context, property.sellerPhone) },
@@ -703,8 +721,22 @@ private fun SellerReportScreen(properties: List<PropertyItem>, viewings: List<Vi
                 Card(Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
                     Text(report, Modifier.padding(18.dp), color = Ink)
                 }
-                Button(onClick = { shareText(context, "Seller report - " + p.title, report) }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                    Icon(Icons.Default.Share, null); Spacer(Modifier.width(8.dp)); Text("Share seller update")
+                Row(Modifier.padding(top = 12.dp)) {
+                    OutlinedButton(onClick = { shareText(context, "Seller report - " + p.title, report) }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Share, null); Spacer(Modifier.width(6.dp)); Text("Share text")
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            runCatching {
+                                val file = PdfExporter.sellerReport(context, p, related)
+                                PdfExporter.share(context, file, "Seller report - " + p.title)
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.PictureAsPdf, null); Spacer(Modifier.width(6.dp)); Text("PDF")
+                    }
                 }
             }
         }
