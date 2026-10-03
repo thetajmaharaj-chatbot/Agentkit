@@ -120,7 +120,9 @@ fun GoogleAddressPicker(
             }
         } else if (data != null) {
             val status = PlaceAutocomplete.getResultStatusFromIntent(data)
-            if (!status.isSuccess) error = status.statusMessage ?: "Address search was not completed."
+            if (status != null && !status.isSuccess) {
+                error = status.statusMessage ?: "Address search was not completed."
+            }
         }
     }
 
